@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ashenda Tigray Beauty Contest</title>
+  <link rel="stylesheet" href="../src/styles.css">
+  <link rel="icon" href="logo.jpeg">
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Montserrat:wght@400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="topbar">
+    <div class="logo">
+      <img src="logo.jpeg" alt="Ashenda Tigray Logo">
+      <span class="title">Ashenda Tigray</span>
+    </div>
+    <button class="top5-btn" id="top5Btn">Top 5</button>
+  </div>
+
+  <section class="hero">
+    <div class="hero-content">
+      <h1>Ashenda Tigray Beauty Contest</h1>
+      <p>Celebrate the beauty, culture, and spirit of Ashenda! Vote for your favorite contestant and help us crown the Ashenda Beauty of the year. Join the contest, honor tradition, and support your community!</p>
+      <div class="countdown" id="countdown">
+        <span id="days">00</span> days
+        <span id="hours">00</span> hrs
+        <span id="minutes">00</span> min
+        <span id="seconds">00</span> sec
+      </div>
+    </div>
+  </section>
+
+  <form class="search-bar" id="searchForm" autocomplete="off">
+    <input type="text" id="searchInput" placeholder="Search by name..." />
+    <button type="submit">Search</button>
+  </form>
+  <section class="nominees" id="nominees"></section>
+  <nav class="pagination" id="pagination"></nav>
+  <section class="top5-table-section" id="top5TableSection" style="display:none;">
+    <h2><span class="trophy-icon">🏆</span> Top 5 Contestants</h2>
+    <div class="top5-table-wrapper">
+      <table class="top5-table" id="top5Table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Photo</th>
+            <th>Name</th>
+            <th>Votes</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer class="footer">
+    &copy; <span id="year"></span> Ashenda Tigray. All rights reserved.
+  </footer>
+
+  <div id="voteMessage" class="vote-message" style="display:none;"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/fingerprintjs2/2.1.0/fingerprint2.min.js"></script>
+  <script type="module" src="../src/app.js"></script>
+</body>
+</html> 
