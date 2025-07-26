@@ -196,7 +196,7 @@ body {
 }
 /* Nominee Card Image Styles */
 .nominee-card img {
-  width: 100%;
+  width: 95%;
   height: 370px;
   object-fit: cover;
   border-radius: 8px 8px 0 0;
