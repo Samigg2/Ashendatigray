@@ -1,6 +1,7 @@
 import { supabase } from './supabase.js';
 
-console.log('app.js loaded');
+// Top-level console log for debugging script loading
+// console.log('app.js loaded');
 
 // --- Config ---
 const NOMINEES_PER_PAGE = 10;
@@ -103,7 +104,6 @@ async function signInWithGoogle(redirectTo = window.location.href) {
 
 // --- Data Fetching ---
 async function fetchNominees() {
-  console.log('fetchNominees called');
   // Fetch all nominees
   const { data: nomineesData, error: nomineesError } = await supabase
     .from('nominees')
@@ -114,9 +114,6 @@ async function fetchNominees() {
   const { data: votesData, error: votesError } = await supabase
     .from('votes')
     .select('nominee_id');
-
-  console.log('nomineesData:', nomineesData, 'error:', nomineesError);
-  console.log('votesData:', votesData, 'error:', votesError);
 
   if (nomineesData) {
     // Count votes for each nominee
@@ -302,7 +299,6 @@ top5Btn.addEventListener('click', () => {
 
 // --- Initial Load ---
 async function init() {
-  console.log('init called');
   await getUser();
   await fetchCountdownDate(); // Fetch countdown date first
   await fetchNominees();
