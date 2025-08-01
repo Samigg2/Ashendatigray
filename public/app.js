@@ -1,7 +1,6 @@
 import { supabase } from './supabase.js';
 
-// Top-level console log for debugging script loading
-// console.log('app.js loaded');
+
 
 // --- Config ---
 const NOMINEES_PER_PAGE = 10;
@@ -28,6 +27,22 @@ let userVotes = new Set();
 // Remove all FingerprintJS/Fingerprint2 logic
 // Remove deviceFingerprint and loadFingerprint
 
+// --- Auth State Listener ---
+supabase.auth.onAuthStateChange(async (event, session) => {
+  try {
+    if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+      user = session?.user || null;
+      await getUser(); // Refresh user votes data
+      renderNominees(); // Update UI
+    } else if (event === 'SIGNED_OUT') {
+      user = null;
+      userVotes = new Set();
+      renderNominees();
+    }
+  } catch (error) {
+  }
+});
+
 // --- Utility ---
 function escapeHTML(str) {
   if (!str) return '';
@@ -39,7 +54,7 @@ async function fetchCountdownDate() {
   const { data, error } = await supabase
     .from('settings')
     .select('value')
-    .eq('key', 'countdown_date')
+    .limit(1)
     .single();
   
   if (data && data.value) {
@@ -47,7 +62,10 @@ async function fetchCountdownDate() {
     updateCountdown();
   } else {
     // Fallback to default date if not set
-    COUNTDOWN_TARGET = new Date('2024-12-31T23:59:59Z');
+    const futureDate = new Date();
+    futureDate.setMonth(futureDate.getMonth() + 3);
+    futureDate.setHours(23, 59, 59, 999);
+    COUNTDOWN_TARGET = futureDate;
     updateCountdown();
   }
 }
@@ -81,87 +99,213 @@ yearEl.textContent = new Date().getFullYear();
 
 // --- Auth ---
 async function getUser() {
-  const { data } = await supabase.auth.getUser();
-  user = data.user;
-  if (user) {
-    // Get all votes by this user
-    const { data: votes } = await supabase
-      .from('votes')
-      .select('nominee_id')
-      .eq('user_id', user.id);
-    userVotes = new Set((votes || []).map(v => v.nominee_id));
-  } else {
+  try {
+    const { data } = await supabase.auth.getUser();
+    user = data.user;
+    
+    if (user) {
+      // Keep track of user votes for display purposes only
+      const { data: votes } = await supabase
+        .from('votes')
+        .select('nominee_id')
+        .eq('user_id', user.id);
+      userVotes = new Set((votes || []).map(v => v.nominee_id));
+    } else {
+      userVotes = new Set();
+    }
+  } catch (error) {
+    user = null;
     userVotes = new Set();
   }
 }
 
-async function signInWithGoogle(redirectTo = window.location.href) {
-  await supabase.auth.signInWithOAuth({
-    provider: 'google',
-    options: { redirectTo }
-  });
+// Check if user is already signed in with Google (silent auth)
+async function checkExistingGoogleAuth() {
+  try {
+    // First check if we already have a session
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (sessionData.session && sessionData.session.user) {
+      user = sessionData.session.user;
+      return true;
+    }
+    
+    return false;
+  } catch (err) {
+    return false;
+  }
+}
+
+async function signInWithGoogle(redirectTo = 'http://127.0.0.1:5500/public/index.html') {
+  try {
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { 
+        redirectTo,
+        queryParams: {
+          prompt: 'select_account' // Force account selection
+        }
+      }
+    });
+    
+    if (error) {
+      showVoteMessage('Sign in failed. Please try again.');
+    } else {
+    }
+  } catch (err) {
+    showVoteMessage('Sign in failed. Please try again.');
+  }
 }
 
 // --- Data Fetching ---
+async function checkDatabaseConnection() {
+  try {
+    const { data, error } = await supabase
+      .from('nominees')
+      .select('id')
+      .limit(1);
+    
+    if (error) {
+      return false;
+    }
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
 async function fetchNominees() {
-  // Fetch all nominees
-  const { data: nomineesData, error: nomineesError } = await supabase
-    .from('nominees')
-    .select('*')
-    .order('created_at', { ascending: true });
+  try {
+    // Fetch all nominees with proper RLS handling
+    const { data: nomineesData, error: nomineesError } = await supabase
+      .from('nominees')
+      .select('*');
 
-  // Fetch all votes
-  const { data: votesData, error: votesError } = await supabase
-    .from('votes')
-    .select('nominee_id');
+    if (nomineesError) {
+      nominees = [];
+      filteredNominees = [];
+      return;
+    }
 
-  if (nomineesData) {
-    // Count votes for each nominee
-    const voteCounts = {};
-    (votesData || []).forEach(v => {
-      voteCounts[v.nominee_id] = (voteCounts[v.nominee_id] || 0) + 1;
-    });
-    nomineesData.forEach(n => {
-      n.votes = voteCounts[n.id] || 0;
-    });
-    nominees = nomineesData;
-    filteredNominees = nominees;
-  } else {
+    // Fetch all votes
+    const { data: votesData, error: votesError } = await supabase
+      .from('votes')
+      .select('nominee_id');
+
+    if (nomineesData) {
+      // Count votes for each nominee
+      const voteCounts = {};
+      (votesData || []).forEach(v => {
+        voteCounts[v.nominee_id] = (voteCounts[v.nominee_id] || 0) + 1;
+      });
+      nomineesData.forEach(n => {
+        n.votes = voteCounts[n.id] || 0;
+      });
+      nominees = nomineesData;
+      filteredNominees = nominees;
+    } else {
+      nominees = [];
+      filteredNominees = [];
+    }
+  } catch (error) {
     nominees = [];
     filteredNominees = [];
   }
 }
 
 // --- Voting ---
-// This will block voting from the same browser/device, regardless of user, unless localStorage is cleared.
 async function voteForNominee(nomineeId) {
-  if (localStorage.getItem('ashendaVoted')) {
-    showVoteMessage('Already voted!');
-    return;
+  try {
+    // If not logged in, try silent auth first, then popup if needed
+    if (!user) {
+      // Try to get existing session first
+      const hasSession = await checkExistingGoogleAuth();
+      if (hasSession) {
+        await getUser();
+      }
+      
+      // If still no user after silent check, show popup
+      if (!user) {
+        await signInWithGoogle();
+        return; // Don't auto-vote, user needs to click again
+      }
+    }
+    
+    // Refresh user data to make sure we have latest vote information
+    await getUser();
+    
+    // Check if user has already voted (database check - primary protection)
+    if (userVotes.size > 0) {
+      showVoteMessage('You already voted!');
+      return;
+    }
+    
+    // Check device-based voting as secondary protection
+    const deviceVoteKey = `ashenda_voted_${user.id}`;
+    try {
+      if (localStorage.getItem(deviceVoteKey)) {
+        showVoteMessage('You already voted!');
+        return;
+      }
+    } catch (error) {
+      // localStorage might be disabled or full, continue without device check
+    }
+    
+    // Insert vote
+    const { data: voteData, error: voteError } = await supabase
+      .from('votes')
+      .insert({ user_id: user.id, nominee_id: nomineeId })
+      .select();
+      
+    if (voteError) {
+      if (voteError.code === '23505') {
+        showVoteMessage('You already voted!');
+      } else {
+        showVoteMessage('Error voting. Please try again.');
+      }
+      return;
+    }
+    
+    // Set device flag for this user
+    try {
+      localStorage.setItem(deviceVoteKey, 'true');
+    } catch (error) {
+      // localStorage might be disabled or full, continue without setting flag
+    }
+    
+    // Update vote count immediately
+    const nominee = nominees.find(n => n.id === nomineeId);
+    if (nominee) {
+      nominee.votes = (nominee.votes || 0) + 1;
+    }
+    
+    // Add to user votes
+    userVotes.add(nomineeId);
+    
+    // Re-render immediately
+    renderNominees();
+    
+    // Refresh from database
+    setTimeout(async () => {
+      try {
+        await fetchNominees();
+        renderNominees();
+      } catch (error) {
+      }
+    }, 1000);
+    
+    showVoteMessage('Thank you for voting!');
+  } catch (error) {
+    showVoteMessage('Error voting. Please try again.');
   }
-  if (!user) {
-    await signInWithGoogle();
-    return;
+}
+
+// --- Handle pending vote after OAuth redirect ---
+async function handlePendingVote() {
+  try {
+    // Remove any pending vote without executing it
+    sessionStorage.removeItem('pendingVote');
+  } catch (error) {
   }
-  if (userVotes.size > 0) {
-    showVoteMessage('Already voted!');
-    return;
-  }
-  // Insert vote
-  const { error: voteError } = await supabase
-    .from('votes')
-    .insert({ user_id: user.id, nominee_id: nomineeId });
-  if (voteError) {
-    showVoteMessage('Already voted!');
-    return;
-  }
-  // Set device flag in localStorage
-  localStorage.setItem('ashendaVoted', 'true');
-  // Refresh user and nominees to get updated vote counts
-  await getUser();
-  await fetchNominees();
-  renderNominees();
-  showVoteMessage('Thank you for voting!');
 }
 
 // --- Render Functions ---
@@ -185,8 +329,32 @@ function renderNominees() {
   const pageNominees = filteredNominees.slice(start, start + NOMINEES_PER_PAGE);
 
   nomineesEl.innerHTML = pageNominees.map(n => {
-    const hasVoted = userVotes.size > 0;
-    const votedForThis = userVotes.has(n.id);
+    // Check if user has already voted (any nominee)
+    const userHasVoted = user && userVotes.size > 0;
+    
+    // Check device-based voting as backup (only if user exists and has valid ID)
+    let deviceVoted = false;
+    if (user && user.id && typeof user.id === 'string' && user.id.length > 0) {
+      try {
+        const deviceVoteKey = `ashenda_voted_${user.id}`;
+        deviceVoted = !!localStorage.getItem(deviceVoteKey);
+      } catch (error) {
+        deviceVoted = false;
+      }
+    }
+    
+    // Determine button state
+    let buttonText = 'Vote';
+    let buttonDisabled = false;
+    
+    if (userHasVoted || deviceVoted) {
+      buttonText = 'Voted';
+      buttonDisabled = true;
+    } else if (!user) {
+      buttonText = 'Vote';
+      buttonDisabled = false;
+    }
+    
     // Ensure optional fields are handled safely
     const photo = n.photo_url ? escapeHTML(n.photo_url) : PLACEHOLDER_PHOTO;
     const name = n.name ? escapeHTML(n.name) : 'Unknown';
@@ -199,8 +367,8 @@ function renderNominees() {
         <div class="city">${city}</div>
         <a class="facebook" href="${facebook}" target="_blank">Facebook</a>
         <div class="votes">Votes: ${n.votes || 0}</div>
-        <button class="vote-btn" data-id="${n.id}" ${hasVoted ? 'disabled' : ''}>
-          ${votedForThis ? 'Voted' : 'Vote'}
+        <button class="vote-btn" data-id="${n.id}" ${buttonDisabled ? 'disabled' : ''}>
+          ${buttonText}
         </button>
       </div>
     `;
@@ -253,10 +421,6 @@ function renderTop5Table() {
 nomineesEl.addEventListener('click', async e => {
   if (e.target.classList.contains('vote-btn')) {
     const nomineeId = e.target.getAttribute('data-id');
-    if (localStorage.getItem('ashendaVoted')) {
-      showVoteMessage('Already voted!');
-      return;
-    }
     await voteForNominee(nomineeId);
   }
 });
@@ -297,17 +461,45 @@ top5Btn.addEventListener('click', () => {
   }
 });
 
+// Clear device votes function
+function clearDeviceVotes() {
+  if (user) {
+    localStorage.removeItem(`ashenda_voted_${user.id}`);
+    renderNominees();
+  }
+}
+
+// Make it available globally
+window.clearDeviceVotes = clearDeviceVotes;
+
 // --- Initial Load ---
 async function init() {
-  await getUser();
-  await fetchCountdownDate(); // Fetch countdown date first
-  await fetchNominees();
-  searchInput.value = '';
-  filteredNominees = nominees;
-  renderNominees();
-  
-  // Start countdown timer
-  setInterval(updateCountdown, 1000);
+  try {
+    // Check database connection
+    const dbConnected = await checkDatabaseConnection();
+    if (!dbConnected) {
+      showVoteMessage('Database connection failed. Please refresh the page.');
+      return;
+    }
+    
+    // Check if we're returning from OAuth or have existing session
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session && session.user) {
+      user = session.user;
+    }
+    
+    await getUser();
+    await fetchCountdownDate(); // Fetch countdown date first
+    await fetchNominees();
+    searchInput.value = '';
+    filteredNominees = nominees;
+    renderNominees();
+    
+    // Start countdown timer
+    setInterval(updateCountdown, 1000);
+  } catch (error) {
+    showVoteMessage('Failed to initialize app. Please refresh the page.');
+  }
 }
 
 init(); 

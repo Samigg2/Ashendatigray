@@ -16,7 +16,7 @@
 body {
   margin: 0;
   font-family: 'Montserrat', Arial, sans-serif;
-  background: var(--bg) url('../public/bg.jpg') no-repeat center top/cover;
+  /* background: var(--bg) url('./bg.jpeg') no-repeat center top/cover; */
   color: var(--text);
   min-height: 100vh;
   overflow-x: hidden;
