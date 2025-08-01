@@ -135,12 +135,24 @@ async function checkExistingGoogleAuth() {
   }
 }
 
-async function signInWithGoogle(redirectTo = 'http://127.0.0.1:5500/public/index.html') {
+async function signInWithGoogle(redirectTo = null) {
   try {
+    // Determine the correct redirect URL based on environment
+    let redirectUrl;
+    if (redirectTo) {
+      redirectUrl = redirectTo;
+    } else if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      // Local development
+      redirectUrl = window.location.origin + '/public/index.html';
+    } else {
+      // Production (Vercel)
+      redirectUrl = 'https://ashendatigray.vercel.app/public/index.html';
+    }
+    
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: { 
-        redirectTo,
+        redirectTo: redirectUrl,
         queryParams: {
           prompt: 'select_account' // Force account selection
         }
