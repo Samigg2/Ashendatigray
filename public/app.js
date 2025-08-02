@@ -193,20 +193,29 @@ async function fetchNominees() {
       .select('*');
 
     if (nomineesError) {
+      console.log('Nominees fetch error:', nomineesError);
       nominees = [];
       filteredNominees = [];
       return;
     }
 
-    // Fetch all votes
-    const { data: votesData, error: votesError } = await supabase
-      .from('votes')
-      .select('nominee_id');
+    // Fetch all votes (don't fail if votes fail)
+    let votesData = [];
+    try {
+      const { data: votesResult, error: votesError } = await supabase
+        .from('votes')
+        .select('nominee_id');
+      if (!votesError) {
+        votesData = votesResult || [];
+      }
+    } catch (error) {
+      console.log('Votes fetch failed, continuing without vote counts');
+    }
 
-    if (nomineesData) {
+    if (nomineesData && nomineesData.length > 0) {
       // Count votes for each nominee
       const voteCounts = {};
-      (votesData || []).forEach(v => {
+      votesData.forEach(v => {
         voteCounts[v.nominee_id] = (voteCounts[v.nominee_id] || 0) + 1;
       });
       nomineesData.forEach(n => {
@@ -219,6 +228,7 @@ async function fetchNominees() {
       filteredNominees = [];
     }
   } catch (error) {
+    console.log('Fetch nominees error:', error);
     nominees = [];
     filteredNominees = [];
   }
@@ -487,30 +497,61 @@ window.clearDeviceVotes = clearDeviceVotes;
 // --- Initial Load ---
 async function init() {
   try {
-    // Check database connection
-    const dbConnected = await checkDatabaseConnection();
-    if (!dbConnected) {
-      showVoteMessage('Database connection failed. Please refresh the page.');
-      return;
-    }
-    
     // Check if we're returning from OAuth or have existing session
     const { data: { session } } = await supabase.auth.getSession();
     if (session && session.user) {
       user = session.user;
     }
     
-    await getUser();
-    await fetchCountdownDate(); // Fetch countdown date first
-    await fetchNominees();
+    // Try to get user data (don't fail if it doesn't work)
+    try {
+      await getUser();
+    } catch (error) {
+      console.log('User data fetch failed, continuing...');
+    }
+    
+    // Try to fetch countdown date (don't fail if it doesn't work)
+    try {
+      await fetchCountdownDate();
+    } catch (error) {
+      console.log('Countdown fetch failed, using fallback...');
+    }
+    
+    // Try to fetch nominees (don't fail if it doesn't work)
+    try {
+      await fetchNominees();
+    } catch (error) {
+      console.log('Nominees fetch failed, showing empty state...');
+      nominees = [];
+      filteredNominees = [];
+    }
+    
     searchInput.value = '';
     filteredNominees = nominees;
     renderNominees();
     
     // Start countdown timer
     setInterval(updateCountdown, 1000);
+    
+    // Retry fetching nominees after 3 seconds if it failed
+    setTimeout(async () => {
+      if (nominees.length === 0) {
+        try {
+          await fetchNominees();
+          filteredNominees = nominees;
+          renderNominees();
+        } catch (error) {
+          console.log('Retry fetch failed');
+        }
+      }
+    }, 3000);
+    
   } catch (error) {
-    showVoteMessage('Failed to initialize app. Please refresh the page.');
+    console.error('Init error:', error);
+    // Don't show error message, just continue with empty state
+    nominees = [];
+    filteredNominees = [];
+    renderNominees();
   }
 }
 
