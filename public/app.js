@@ -146,7 +146,7 @@ async function signInWithGoogle(redirectTo = null) {
       redirectUrl = window.location.origin + '/public/index.html';
     } else {
       // Production (Vercel)
-      redirectUrl = 'https://ashendatigray.vercel.app/public/index.html';
+      redirectUrl = 'https://ashendatigray.vercel.app/';
     }
     
     const { data, error } = await supabase.auth.signInWithOAuth({
