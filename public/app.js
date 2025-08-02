@@ -100,20 +100,30 @@ yearEl.textContent = new Date().getFullYear();
 // --- Auth ---
 async function getUser() {
   try {
+    console.log('🔐 Getting user data...');
     const { data } = await supabase.auth.getUser();
     user = data.user;
     
     if (user) {
+      console.log('✅ User found:', user.id);
       // Keep track of user votes for display purposes only
-      const { data: votes } = await supabase
-        .from('votes')
-        .select('nominee_id')
-        .eq('user_id', user.id);
-      userVotes = new Set((votes || []).map(v => v.nominee_id));
+      try {
+        const { data: votes } = await supabase
+          .from('votes')
+          .select('nominee_id')
+          .eq('user_id', user.id);
+        userVotes = new Set((votes || []).map(v => v.nominee_id));
+        console.log('✅ User votes loaded:', userVotes.size);
+      } catch (voteError) {
+        console.log('❌ Failed to load user votes:', voteError.message);
+        userVotes = new Set();
+      }
     } else {
+      console.log('❌ No user found');
       userVotes = new Set();
     }
   } catch (error) {
+    console.log('❌ getUser error:', error.message);
     user = null;
     userVotes = new Set();
   }
@@ -518,6 +528,31 @@ async function init() {
   console.log('🚀 Starting app initialization...');
   
   try {
+    // Handle OAuth callback if returning from sign-in
+    console.log('📋 Checking for OAuth callback...');
+    const urlParams = new URLSearchParams(window.location.hash.substring(1));
+    const accessToken = urlParams.get('access_token');
+    const refreshToken = urlParams.get('refresh_token');
+    
+    if (accessToken && refreshToken) {
+      console.log('🔄 OAuth callback detected, setting session...');
+      try {
+        const { data, error } = await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken
+        });
+        if (error) {
+          console.log('❌ Failed to set session:', error.message);
+        } else {
+          console.log('✅ Session set successfully');
+          // Clear the URL hash
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
+      } catch (sessionError) {
+        console.log('❌ Session error:', sessionError.message);
+      }
+    }
+    
     // Check if we're returning from OAuth or have existing session
     console.log('📋 Checking auth session...');
     const { data: { session } } = await supabase.auth.getSession();
@@ -531,7 +566,12 @@ async function init() {
     // Try to get user data (don't fail if it doesn't work)
     console.log('👤 Fetching user data...');
     try {
-      await getUser();
+      // Add timeout to prevent getting stuck
+      const userPromise = getUser();
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('User fetch timeout')), 5000)
+      );
+      await Promise.race([userPromise, timeoutPromise]);
       console.log('✅ User data fetched successfully');
     } catch (error) {
       console.log('❌ User data fetch failed:', error.message);
