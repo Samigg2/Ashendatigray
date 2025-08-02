@@ -186,33 +186,43 @@ async function checkDatabaseConnection() {
 }
 
 async function fetchNominees() {
+  console.log('🔍 Starting fetchNominees...');
+  
   try {
     // Fetch all nominees with proper RLS handling
+    console.log('📊 Fetching nominees from database...');
     const { data: nomineesData, error: nomineesError } = await supabase
       .from('nominees')
       .select('*');
 
     if (nomineesError) {
-      console.log('Nominees fetch error:', nomineesError);
+      console.log('❌ Nominees fetch error:', nomineesError);
       nominees = [];
       filteredNominees = [];
       return;
     }
 
+    console.log(`📋 Raw nominees data:`, nomineesData);
+
     // Fetch all votes (don't fail if votes fail)
     let votesData = [];
     try {
+      console.log('🗳️ Fetching votes from database...');
       const { data: votesResult, error: votesError } = await supabase
         .from('votes')
         .select('nominee_id');
       if (!votesError) {
         votesData = votesResult || [];
+        console.log(`📊 Votes data:`, votesData);
+      } else {
+        console.log('❌ Votes fetch error:', votesError);
       }
     } catch (error) {
-      console.log('Votes fetch failed, continuing without vote counts');
+      console.log('❌ Votes fetch failed:', error.message);
     }
 
     if (nomineesData && nomineesData.length > 0) {
+      console.log(`✅ Processing ${nomineesData.length} nominees...`);
       // Count votes for each nominee
       const voteCounts = {};
       votesData.forEach(v => {
@@ -223,12 +233,14 @@ async function fetchNominees() {
       });
       nominees = nomineesData;
       filteredNominees = nominees;
+      console.log(`🎉 Final nominees array:`, nominees);
     } else {
+      console.log('❌ No nominees data or empty array');
       nominees = [];
       filteredNominees = [];
     }
   } catch (error) {
-    console.log('Fetch nominees error:', error);
+    console.log('💥 Fetch nominees error:', error);
     nominees = [];
     filteredNominees = [];
   }
@@ -343,12 +355,19 @@ function showVoteMessage(msg) {
 }
 
 function renderNominees() {
+  console.log('🎨 Starting renderNominees...');
+  console.log(`📊 filteredNominees length: ${filteredNominees.length}`);
+  console.log(`📊 nominees length: ${nominees.length}`);
+  
   // Pagination
   const total = filteredNominees.length;
   const totalPages = Math.ceil(total / NOMINEES_PER_PAGE);
   currentPage = Math.max(1, Math.min(currentPage, totalPages));
   const start = (currentPage - 1) * NOMINEES_PER_PAGE;
   const pageNominees = filteredNominees.slice(start, start + NOMINEES_PER_PAGE);
+  
+  console.log(`📄 Rendering page ${currentPage} of ${totalPages}`);
+  console.log(`📄 Page nominees:`, pageNominees);
 
   nomineesEl.innerHTML = pageNominees.map(n => {
     // Check if user has already voted (any nominee)
@@ -496,39 +515,53 @@ window.clearDeviceVotes = clearDeviceVotes;
 
 // --- Initial Load ---
 async function init() {
+  console.log('🚀 Starting app initialization...');
+  
   try {
     // Check if we're returning from OAuth or have existing session
+    console.log('📋 Checking auth session...');
     const { data: { session } } = await supabase.auth.getSession();
     if (session && session.user) {
       user = session.user;
+      console.log('✅ User session found:', user.id);
+    } else {
+      console.log('❌ No user session found');
     }
     
     // Try to get user data (don't fail if it doesn't work)
+    console.log('👤 Fetching user data...');
     try {
       await getUser();
+      console.log('✅ User data fetched successfully');
     } catch (error) {
-      console.log('User data fetch failed, continuing...');
+      console.log('❌ User data fetch failed:', error.message);
     }
     
     // Try to fetch countdown date (don't fail if it doesn't work)
+    console.log('⏰ Fetching countdown date...');
     try {
       await fetchCountdownDate();
+      console.log('✅ Countdown date fetched successfully');
     } catch (error) {
-      console.log('Countdown fetch failed, using fallback...');
+      console.log('❌ Countdown fetch failed:', error.message);
     }
     
     // Try to fetch nominees (don't fail if it doesn't work)
+    console.log('👥 Fetching nominees...');
     try {
       await fetchNominees();
+      console.log(`✅ Nominees fetched successfully: ${nominees.length} nominees`);
     } catch (error) {
-      console.log('Nominees fetch failed, showing empty state...');
+      console.log('❌ Nominees fetch failed:', error.message);
       nominees = [];
       filteredNominees = [];
     }
     
+    console.log('🎨 Rendering nominees...');
     searchInput.value = '';
     filteredNominees = nominees;
     renderNominees();
+    console.log('✅ App initialization complete');
     
     // Start countdown timer
     setInterval(updateCountdown, 1000);
@@ -536,18 +569,20 @@ async function init() {
     // Retry fetching nominees after 3 seconds if it failed
     setTimeout(async () => {
       if (nominees.length === 0) {
+        console.log('🔄 Retrying nominees fetch...');
         try {
           await fetchNominees();
           filteredNominees = nominees;
           renderNominees();
+          console.log(`✅ Retry successful: ${nominees.length} nominees`);
         } catch (error) {
-          console.log('Retry fetch failed');
+          console.log('❌ Retry fetch failed:', error.message);
         }
       }
     }, 3000);
     
   } catch (error) {
-    console.error('Init error:', error);
+    console.error('💥 Init error:', error);
     // Don't show error message, just continue with empty state
     nominees = [];
     filteredNominees = [];
