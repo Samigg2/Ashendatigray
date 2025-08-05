@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ashenda Admin</title>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
     <style>
         * {
             margin: 0;
@@ -284,9 +284,9 @@
                     redirectTo: redirectUrl
                 }
             });
-            if (error) {
-                console.error('Error signing in:', error);
-            }
+                             if (error) {
+                     // Ignore sign-in errors
+                 }
         }
         
         // Load current settings
@@ -336,14 +336,13 @@
                             const localDateTime = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
                             countdownDateInput.value = localDateTime.toISOString().slice(0, 16);
                         }
-                    } catch (e) {
-                        console.error('Error parsing date:', e);
-                    }
+                                         } catch (e) {
+                         // Ignore date parsing errors
+                     }
                 }
-            } catch (error) {
-                console.error('Error loading settings:', error);
-                currentSettings.innerHTML = '<h3>Error loading settings</h3>';
-            }
+                         } catch (error) {
+                 currentSettings.innerHTML = '<h3>Error loading settings</h3>';
+             }
         }
         
         // Update countdown date - Modified to work without key column
@@ -385,14 +384,13 @@
                 // Reload current settings
                 loadCurrentSettings();
                 
-            } catch (error) {
-                console.error('Error updating countdown:', error);
-                countdownStatus.innerHTML = `
-                    <div class="status error">
-                        ❌ Error updating countdown: ${error.message}
-                    </div>
-                `;
-            }
+                         } catch (error) {
+                 countdownStatus.innerHTML = `
+                     <div class="status error">
+                         ❌ Error updating countdown: ${error.message}
+                     </div>
+                 `;
+             }
         }
         
         // Add nominee - FIXED: Proper form data handling
@@ -442,14 +440,13 @@
                 // Reset form
                 nomineeForm.reset();
                 
-            } catch (error) {
-                console.error('Error adding nominee:', error);
-                nomineeStatus.innerHTML = `
-                    <div class="status error">
-                        ❌ Error adding nominee: ${error.message}
-                    </div>
-                `;
-            }
+                         } catch (error) {
+                 nomineeStatus.innerHTML = `
+                     <div class="status error">
+                         ❌ Error adding nominee: ${error.message}
+                     </div>
+                 `;
+             }
         }
         
         // Event listeners

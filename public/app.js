@@ -3,10 +3,11 @@ import { supabase } from './supabase.js';
 
 
 // --- Config ---
-const NOMINEES_PER_PAGE = 10;
-// Remove the hardcoded COUNTDOWN_TARGET and replace with dynamic fetching
+const NOMINEES_PER_PAGE = 20; // More nominees per page = faster
 let COUNTDOWN_TARGET = null;
 const PLACEHOLDER_PHOTO = 'https://via.placeholder.com/300x400/FFD700/000000?text=Photo';
+const DEBOUNCE_DELAY = 100; // Super fast search
+const CACHE_DURATION = 30000; // 30 seconds cache
 
 // --- DOM Elements ---
 const nomineesEl = document.getElementById('nominees');
@@ -24,15 +25,16 @@ let filteredNominees = [];
 let currentPage = 1;
 let user = null;
 let userVotes = new Set();
-// Remove all FingerprintJS/Fingerprint2 logic
-// Remove deviceFingerprint and loadFingerprint
+let lastFetchTime = 0; // Cache timestamp
+let searchCache = new Map(); // Search results cache
+
 
 // --- Auth State Listener ---
 supabase.auth.onAuthStateChange(async (event, session) => {
   try {
     if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
       user = session?.user || null;
-      await getUser(); // Refresh user votes data
+      // Don't refresh user data here to avoid blocking
       renderNominees(); // Update UI
     } else if (event === 'SIGNED_OUT') {
       user = null;
@@ -40,6 +42,7 @@ supabase.auth.onAuthStateChange(async (event, session) => {
       renderNominees();
     }
   } catch (error) {
+    // Ignore auth errors, don't block the app
   }
 });
 
@@ -51,16 +54,25 @@ function escapeHTML(str) {
 
 // --- Countdown Timer ---
 async function fetchCountdownDate() {
-  const { data, error } = await supabase
-    .from('settings')
-    .select('value')
-    .limit(1)
-    .single();
-  
-  if (data && data.value) {
-    COUNTDOWN_TARGET = new Date(data.value);
-    updateCountdown();
-  } else {
+  try {
+    const { data, error } = await supabase
+      .from('settings')
+      .select('value')
+      .limit(1)
+      .single();
+    
+    if (data && data.value) {
+      COUNTDOWN_TARGET = new Date(data.value);
+      updateCountdown();
+    } else {
+      // Fallback to default date if not set
+      const futureDate = new Date();
+      futureDate.setMonth(futureDate.getMonth() + 3);
+      futureDate.setHours(23, 59, 59, 999);
+      COUNTDOWN_TARGET = futureDate;
+      updateCountdown();
+    }
+  } catch (error) {
     // Fallback to default date if not set
     const futureDate = new Date();
     futureDate.setMonth(futureDate.getMonth() + 3);
@@ -100,12 +112,10 @@ yearEl.textContent = new Date().getFullYear();
 // --- Auth ---
 async function getUser() {
   try {
-    console.log('🔐 Getting user data...');
     const { data } = await supabase.auth.getUser();
     user = data.user;
     
     if (user) {
-      console.log('✅ User found:', user.id);
       // Keep track of user votes for display purposes only
       try {
         const { data: votes } = await supabase
@@ -113,17 +123,13 @@ async function getUser() {
           .select('nominee_id')
           .eq('user_id', user.id);
         userVotes = new Set((votes || []).map(v => v.nominee_id));
-        console.log('✅ User votes loaded:', userVotes.size);
       } catch (voteError) {
-        console.log('❌ Failed to load user votes:', voteError.message);
         userVotes = new Set();
       }
     } else {
-      console.log('❌ No user found');
       userVotes = new Set();
     }
   } catch (error) {
-    console.log('❌ getUser error:', error.message);
     user = null;
     userVotes = new Set();
   }
@@ -196,43 +202,38 @@ async function checkDatabaseConnection() {
 }
 
 async function fetchNominees() {
-  console.log('🔍 Starting fetchNominees...');
+  // Check cache first
+  const now = Date.now();
+  if (now - lastFetchTime < CACHE_DURATION && nominees.length > 0) {
+    return; // Use cached data
+  }
   
   try {
-    // Fetch all nominees with proper RLS handling
-    console.log('📊 Fetching nominees from database...');
+    // Always try anonymous access first (no auth required for viewing)
     const { data: nomineesData, error: nomineesError } = await supabase
       .from('nominees')
       .select('*');
 
     if (nomineesError) {
-      console.log('❌ Nominees fetch error:', nomineesError);
       nominees = [];
       filteredNominees = [];
       return;
     }
 
-    console.log(`📋 Raw nominees data:`, nomineesData);
-
     // Fetch all votes (don't fail if votes fail)
     let votesData = [];
     try {
-      console.log('🗳️ Fetching votes from database...');
       const { data: votesResult, error: votesError } = await supabase
         .from('votes')
         .select('nominee_id');
       if (!votesError) {
         votesData = votesResult || [];
-        console.log(`📊 Votes data:`, votesData);
-      } else {
-        console.log('❌ Votes fetch error:', votesError);
       }
     } catch (error) {
-      console.log('❌ Votes fetch failed:', error.message);
+      // Continue without votes
     }
 
     if (nomineesData && nomineesData.length > 0) {
-      console.log(`✅ Processing ${nomineesData.length} nominees...`);
       // Count votes for each nominee
       const voteCounts = {};
       votesData.forEach(v => {
@@ -243,14 +244,13 @@ async function fetchNominees() {
       });
       nominees = nomineesData;
       filteredNominees = nominees;
-      console.log(`🎉 Final nominees array:`, nominees);
+      lastFetchTime = now; // Update cache timestamp
+      searchCache.clear(); // Clear search cache when data updates
     } else {
-      console.log('❌ No nominees data or empty array');
       nominees = [];
       filteredNominees = [];
     }
   } catch (error) {
-    console.log('💥 Fetch nominees error:', error);
     nominees = [];
     filteredNominees = [];
   }
@@ -283,16 +283,7 @@ async function voteForNominee(nomineeId) {
       return;
     }
     
-    // Check device-based voting as secondary protection
-    const deviceVoteKey = `ashenda_voted_${user.id}`;
-    try {
-      if (localStorage.getItem(deviceVoteKey)) {
-        showVoteMessage('You already voted!');
-        return;
-      }
-    } catch (error) {
-      // localStorage might be disabled or full, continue without device check
-    }
+
     
     // Insert vote
     const { data: voteData, error: voteError } = await supabase
@@ -309,12 +300,7 @@ async function voteForNominee(nomineeId) {
       return;
     }
     
-    // Set device flag for this user
-    try {
-      localStorage.setItem(deviceVoteKey, 'true');
-    } catch (error) {
-      // localStorage might be disabled or full, continue without setting flag
-    }
+
     
     // Update vote count immediately
     const nominee = nominees.find(n => n.id === nomineeId);
@@ -343,14 +329,7 @@ async function voteForNominee(nomineeId) {
   }
 }
 
-// --- Handle pending vote after OAuth redirect ---
-async function handlePendingVote() {
-  try {
-    // Remove any pending vote without executing it
-    sessionStorage.removeItem('pendingVote');
-  } catch (error) {
-  }
-}
+
 
 // --- Render Functions ---
 function showVoteMessage(msg) {
@@ -365,40 +344,24 @@ function showVoteMessage(msg) {
 }
 
 function renderNominees() {
-  console.log('🎨 Starting renderNominees...');
-  console.log(`📊 filteredNominees length: ${filteredNominees.length}`);
-  console.log(`📊 nominees length: ${nominees.length}`);
-  
   // Pagination
   const total = filteredNominees.length;
   const totalPages = Math.ceil(total / NOMINEES_PER_PAGE);
   currentPage = Math.max(1, Math.min(currentPage, totalPages));
   const start = (currentPage - 1) * NOMINEES_PER_PAGE;
   const pageNominees = filteredNominees.slice(start, start + NOMINEES_PER_PAGE);
-  
-  console.log(`📄 Rendering page ${currentPage} of ${totalPages}`);
-  console.log(`📄 Page nominees:`, pageNominees);
 
   nomineesEl.innerHTML = pageNominees.map(n => {
     // Check if user has already voted (any nominee)
     const userHasVoted = user && userVotes.size > 0;
     
-    // Check device-based voting as backup (only if user exists and has valid ID)
-    let deviceVoted = false;
-    if (user && user.id && typeof user.id === 'string' && user.id.length > 0) {
-      try {
-        const deviceVoteKey = `ashenda_voted_${user.id}`;
-        deviceVoted = !!localStorage.getItem(deviceVoteKey);
-      } catch (error) {
-        deviceVoted = false;
-      }
-    }
+
     
     // Determine button state
     let buttonText = 'Vote';
     let buttonDisabled = false;
     
-    if (userHasVoted || deviceVoted) {
+    if (userHasVoted) {
       buttonText = 'Voted';
       buttonDisabled = true;
     } else if (!user) {
@@ -487,13 +450,55 @@ paginationEl.addEventListener('click', e => {
   }
 });
 
+// Super fast search with caching
+let searchTimeout;
+searchInput.addEventListener('input', e => {
+  clearTimeout(searchTimeout);
+  searchTimeout = setTimeout(() => {
+    const q = e.target.value.trim().toLowerCase();
+    
+    // Check cache first
+    if (searchCache.has(q)) {
+      filteredNominees = searchCache.get(q);
+      currentPage = 1;
+      renderNominees();
+      return;
+    }
+    
+    if (!q) {
+      filteredNominees = nominees;
+    } else {
+      // Super optimized search
+      const results = [];
+      for (let i = 0; i < nominees.length; i++) {
+        const n = nominees[i];
+        const name = n.name?.toLowerCase() || '';
+        const city = n.city?.toLowerCase() || '';
+        if (name.includes(q) || city.includes(q)) {
+          results.push(n);
+        }
+      }
+      filteredNominees = results;
+      
+      // Cache the result
+      searchCache.set(q, results);
+    }
+    currentPage = 1;
+    renderNominees();
+  }, DEBOUNCE_DELAY);
+});
+
+// Keep form submit for accessibility
 searchForm.addEventListener('submit', e => {
   e.preventDefault();
   const q = searchInput.value.trim().toLowerCase();
   if (!q) {
     filteredNominees = nominees;
   } else {
-    filteredNominees = nominees.filter(n => n.name.toLowerCase().includes(q));
+    filteredNominees = nominees.filter(n => 
+      n.name.toLowerCase().includes(q) || 
+      (n.city && n.city.toLowerCase().includes(q))
+    );
   }
   currentPage = 1;
   renderNominees();
@@ -512,117 +517,87 @@ top5Btn.addEventListener('click', () => {
   }
 });
 
-// Clear device votes function
-function clearDeviceVotes() {
-  if (user) {
-    localStorage.removeItem(`ashenda_voted_${user.id}`);
-    renderNominees();
-  }
-}
 
-// Make it available globally
-window.clearDeviceVotes = clearDeviceVotes;
+
+// Production-ready utility functions
+window.clearSession = async function() {
+  try {
+    await supabase.auth.signOut();
+    user = null;
+    userVotes = new Set();
+    window.location.reload();
+  } catch (error) {
+    // Ignore errors
+  }
+};
 
 // --- Initial Load ---
 async function init() {
-  console.log('🚀 Starting app initialization...');
-  
   try {
     // Handle OAuth callback if returning from sign-in
-    console.log('📋 Checking for OAuth callback...');
     const urlParams = new URLSearchParams(window.location.hash.substring(1));
     const accessToken = urlParams.get('access_token');
     const refreshToken = urlParams.get('refresh_token');
     
     if (accessToken && refreshToken) {
-      console.log('🔄 OAuth callback detected, setting session...');
       try {
         const { data, error } = await supabase.auth.setSession({
           access_token: accessToken,
           refresh_token: refreshToken
         });
-        if (error) {
-          console.log('❌ Failed to set session:', error.message);
-        } else {
-          console.log('✅ Session set successfully');
+        if (!error) {
           // Clear the URL hash
           window.history.replaceState({}, document.title, window.location.pathname);
         }
       } catch (sessionError) {
-        console.log('❌ Session error:', sessionError.message);
+        // Ignore session errors
       }
     }
     
-    // Check if we're returning from OAuth or have existing session
-    console.log('📋 Checking auth session...');
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session && session.user) {
-      user = session.user;
-      console.log('✅ User session found:', user.id);
-    } else {
-      console.log('❌ No user session found');
-    }
-    
-    // Try to get user data (don't fail if it doesn't work)
-    console.log('👤 Fetching user data...');
+    // Check for existing session (but don't require it for viewing)
     try {
-      // Add timeout to prevent getting stuck
-      const userPromise = getUser();
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('User fetch timeout')), 5000)
-      );
-      await Promise.race([userPromise, timeoutPromise]);
-      console.log('✅ User data fetched successfully');
-    } catch (error) {
-      console.log('❌ User data fetch failed:', error.message);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session && session.user) {
+        user = session.user;
+        
+        // Try to get user votes (optional, don't block if it fails)
+        try {
+          await getUser();
+        } catch (error) {
+          // Clear user if data fetch fails to prevent issues
+          user = null;
+          userVotes = new Set();
+        }
+      }
+    } catch (sessionError) {
+      // Clear any corrupted session data
+      user = null;
+      userVotes = new Set();
     }
     
-    // Try to fetch countdown date (don't fail if it doesn't work)
-    console.log('⏰ Fetching countdown date...');
+    // Fetch countdown date (no auth required)
     try {
       await fetchCountdownDate();
-      console.log('✅ Countdown date fetched successfully');
     } catch (error) {
-      console.log('❌ Countdown fetch failed:', error.message);
+      // Use fallback countdown
     }
     
-    // Try to fetch nominees (don't fail if it doesn't work)
-    console.log('👥 Fetching nominees...');
+    // Fetch nominees (no auth required)
     try {
       await fetchNominees();
-      console.log(`✅ Nominees fetched successfully: ${nominees.length} nominees`);
     } catch (error) {
-      console.log('❌ Nominees fetch failed:', error.message);
       nominees = [];
       filteredNominees = [];
     }
     
-    console.log('🎨 Rendering nominees...');
     searchInput.value = '';
     filteredNominees = nominees;
     renderNominees();
-    console.log('✅ App initialization complete');
     
     // Start countdown timer
     setInterval(updateCountdown, 1000);
     
-    // Retry fetching nominees after 3 seconds if it failed
-    setTimeout(async () => {
-      if (nominees.length === 0) {
-        console.log('🔄 Retrying nominees fetch...');
-        try {
-          await fetchNominees();
-          filteredNominees = nominees;
-          renderNominees();
-          console.log(`✅ Retry successful: ${nominees.length} nominees`);
-        } catch (error) {
-          console.log('❌ Retry fetch failed:', error.message);
-        }
-      }
-    }, 3000);
-    
   } catch (error) {
-    console.error('💥 Init error:', error);
     // Don't show error message, just continue with empty state
     nominees = [];
     filteredNominees = [];
