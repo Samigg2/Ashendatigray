@@ -262,18 +262,36 @@
          const currentSettings = document.getElementById('current-settings');
          const countdownDateInput = document.getElementById('countdown-date');
         
-                 // Check authentication - Optimized
+                 // Check authentication - Optimized with email restriction
          async function checkAuth() {
              try {
                  const { data: { user } } = await supabase.auth.getUser();
                  if (user) {
-                     authSection.style.display = 'none';
-                     adminContent.style.display = 'block';
-                     loadCurrentSettings();
+                     // Check if user email is authorized
+                     const authorizedEmail = 't988277799@gmail.com'; // CHANGE THIS TO YOUR EMAIL
+                     if (user.email === authorizedEmail) {
+                         authSection.style.display = 'none';
+                         adminContent.style.display = 'block';
+                         loadCurrentSettings();
+                     } else {
+                         // Show unauthorized message
+                         authSection.innerHTML = `
+                             <h2>🚫 Access Denied</h2>
+                             <p>You are not authorized to access this admin panel.</p>
+                             <p>Only the administrator can access this page.</p>
+                             <button onclick="signOut()" class="auth-btn">Sign Out</button>
+                         `;
+                     }
                  }
              } catch (error) {
                  // Silent fallback
              }
+         }
+         
+         // Sign out function
+         async function signOut() {
+             await supabase.auth.signOut();
+             window.location.reload();
          }
         
         // Sign in with Google
@@ -501,18 +519,38 @@
         // Initialize
         checkAuth();
         
-                 // Listen for auth changes - Optimized
+                 // Listen for auth changes - Optimized with email restriction
          supabase.auth.onAuthStateChange((event, session) => {
              if (event === 'SIGNED_IN') {
-                 authSection.style.display = 'none';
-                 adminContent.style.display = 'block';
-                 loadCurrentSettings();
+                 // Check if user email is authorized
+                 const authorizedEmail = 'your-email@gmail.com'; // CHANGE THIS TO YOUR EMAIL
+                 if (session?.user?.email === authorizedEmail) {
+                     authSection.style.display = 'none';
+                     adminContent.style.display = 'block';
+                     loadCurrentSettings();
+                 } else {
+                     // Show unauthorized message
+                     authSection.innerHTML = `
+                         <h2>🚫 Access Denied</h2>
+                         <p>You are not authorized to access this admin panel.</p>
+                         <p>Only the administrator can access this page.</p>
+                         <button onclick="signOut()" class="auth-btn">Sign Out</button>
+                     `;
+                 }
              } else if (event === 'SIGNED_OUT') {
                  authSection.style.display = 'block';
                  adminContent.style.display = 'none';
                  // Clear cache on sign out
                  settingsCache = null;
                  lastSettingsFetch = 0;
+                 // Reset auth section
+                 authSection.innerHTML = `
+                     <h2>🔐 Authentication Required</h2>
+                     <p>Please sign in with Google to access admin features.</p>
+                     <button id="signin-btn" class="auth-btn">Sign in with Google</button>
+                 `;
+                 // Re-attach event listener
+                 document.getElementById('signin-btn').addEventListener('click', signInWithGoogle);
              }
          });
     </script>
