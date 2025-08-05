@@ -282,10 +282,10 @@
             let redirectUrl;
             if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
                 // Local development
-                redirectUrl = window.location.origin + '/admin/admin.html';
+                redirectUrl = window.location.origin + '/admin.html';
             } else {
                 // Production (Vercel)
-                redirectUrl = 'https://ashendatigray.vercel.app/admin/admin.html';
+                redirectUrl = 'https://ashendatigray.vercel.app/admin.html';
             }
             
             const { error } = await supabase.auth.signInWithOAuth({
