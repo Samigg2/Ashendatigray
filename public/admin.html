@@ -523,7 +523,7 @@
          supabase.auth.onAuthStateChange((event, session) => {
              if (event === 'SIGNED_IN') {
                  // Check if user email is authorized
-                 const authorizedEmail = 'your-email@gmail.com'; // CHANGE THIS TO YOUR EMAIL
+                 const authorizedEmail = 't988277799@gmail.com'; // CHANGE THIS TO YOUR EMAIL
                  if (session?.user?.email === authorizedEmail) {
                      authSection.style.display = 'none';
                      adminContent.style.display = 'block';
